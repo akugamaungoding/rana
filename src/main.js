@@ -24,10 +24,14 @@ function getHash() {
 }
 
 function buildShell() {
+  const appBar = document.createElement('header')
+  appBar.className = 'app-bar'
+  appBar.innerHTML = `<div class="app-bar-inner"><span class="brand">Rana</span><span class="brand-sub">Personal finance</span></div>`
+
   // Top nav (desktop)
   const topNav = document.createElement('nav')
   topNav.className = 'top-nav'
-  topNav.innerHTML = `<div class="pill-menu">${
+  topNav.innerHTML = `<div class="pill-menu"><span class="brand">Rana</span>${
     TABS.map(t => `<button class="pill-item" data-hash="${t.hash}"><i class="ti ${t.icon}"></i>${t.label}</button>`).join('')
   }</div>`
 
@@ -45,6 +49,7 @@ function buildShell() {
   ).join('')
 
   app.innerHTML = ''
+  app.appendChild(appBar)
   app.appendChild(topNav)
   app.appendChild(pageContainer)
   app.appendChild(bottomNav)

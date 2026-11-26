@@ -86,10 +86,12 @@ input:focus, select:focus, textarea:focus {
   border-bottom: 1px solid var(--purple-line);
 }
 .top-nav .pill-menu {
-  display: flex; justify-content: center; gap: var(--sp-4);
+  display: flex; justify-content: center; align-items: center; gap: var(--sp-4);
   padding: var(--sp-8) var(--sp-16);
   max-width: 1100px; margin: 0 auto;
+  position: relative;
 }
+.top-nav .brand { position: absolute; left: 16px; }
 .pill-item {
   padding: 10px 20px; border-radius: var(--r-pill);
   font-size: 14px; font-weight: 500;
@@ -655,11 +657,35 @@ input:focus, select:focus, textarea:focus {
   }
 }
 
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--sp-12);
+}
+.list-item-actions .btn-icon { width: 36px; height: 36px; }
+
+.app-bar {
+  position: sticky; top: 0; z-index: 450;
+  background: var(--white);
+  border-bottom: 1px solid var(--purple-line);
+}
+.app-bar-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.brand { font-size: 18px; font-weight: 500; color: var(--purple); letter-spacing: -0.02em; }
+.brand-sub { font-size: 12px; color: var(--text-muted); }
+
 /* === Desktop (900px+) === */
 @media (min-width: 900px) {
   .bottom-nav { display: none !important; }
   .top-nav { display: block; }
-  .fab { display: none !important; }
+  .app-bar { display: none; }
+  .fab { bottom: 32px; right: 32px; }
   .page { padding: var(--sp-24); padding-bottom: var(--sp-32); }
 
   .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-24); }

@@ -67,7 +67,7 @@ export function renderCalendar(container) {
     try {
       const [expRes, incRes, updRes] = await Promise.all([
         supabase.from('expenses').select('*').gte('spent_on', startDate).lt('spent_on', endDate),
-        supabase.from('incomes').select('*').gte('received_on', startDate).lt('received_on', endDate),
+        supabase.from('incomes').select('*').lt('received_on', endDate),
         supabase.from('investment_updates').select('*, investments(name)').gte('recorded_on', startDate).lt('recorded_on', endDate),
       ])
 
@@ -76,7 +76,7 @@ export function renderCalendar(container) {
       if (updRes.error) { console.error('[calendar.updates]', updRes.error); showToast(updRes.error.message, 'error'); return }
 
       const expenses = expRes.data || []
-      const incomes = incRes.data || []
+      const incomes = projectIncomes(incRes.data || [], viewYear, viewMonth)
       const updates = updRes.data || []
 
       buildGrid(expenses, incomes, updates)
@@ -84,6 +84,27 @@ export function renderCalendar(container) {
       console.error('[calendar.load]', err)
       showToast('Failed to load calendar', 'error')
     }
+  }
+
+  function projectIncomes(rows, year, month) {
+    const last = new Date(year, month + 1, 0).getDate()
+    const mk = `${year}-${String(month + 1).padStart(2, '0')}`
+    const projected = []
+    rows.forEach(inc => {
+      const startMk = String(inc.received_on).slice(0, 7)
+      if (!inc.is_recurring) {
+        if (startMk === mk) projected.push(inc)
+        return
+      }
+      if (startMk > mk) return
+      let day = parseInt(String(inc.received_on).slice(8, 10), 10)
+      if (day > last) day = last
+      projected.push({
+        ...inc,
+        received_on: `${mk}-${String(day).padStart(2, '0')}`,
+      })
+    })
+    return projected
   }
 
   function buildGrid(expenses, incomes, updates) {

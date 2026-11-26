@@ -118,7 +118,7 @@ export function renderHome(container) {
       // Recent activity (last 8 items combined)
       const activity = []
       expenses.slice(0, 5).forEach(e => activity.push({ type: 'expense', date: e.spent_on, data: e }))
-      incomes.filter(i => !i.is_recurring).slice(0, 5).forEach(i => activity.push({ type: 'income', date: i.received_on, data: i }))
+      incomes.slice(0, 5).forEach(i => activity.push({ type: 'income', date: i.received_on, data: i }))
       activity.sort((a, b) => b.date.localeCompare(a.date))
 
       const activityEl = document.getElementById('h-activity')
@@ -151,6 +151,7 @@ export function renderHome(container) {
             sub: formatDate(i.received_on),
             amount: `+${formatCurrency(i.amount)}`,
             amountColor: 'var(--success)',
+            badge: i.is_recurring ? 'Monthly' : null,
           }))
         }
       })

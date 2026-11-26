@@ -280,7 +280,8 @@ export function renderInvestments(container) {
             investment_id: inv.id, recorded_on: date, value, note: null
           })
           if (error) {
-            if (error.message && error.message.includes('unique') || error.message.includes('duplicate')) {
+            const msg = error.message || ''
+            if (msg.includes('unique') || msg.includes('duplicate')) {
               showToast('You already have an update for this date', 'error')
             } else {
               console.error('[updates.insert]', error)
