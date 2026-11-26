@@ -23,11 +23,9 @@ export function renderIncome(container) {
           </div>
   async function load() {
     showLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { showLoading(false); return }
-    const uid = session.user.id
+    // No auth check - show all incomes (mode tanpa login)
     try {
-      const { data, error } = await supabase.from('incomes').select('*').eq('user_id', uid).order('received_on', { ascending: false })
+      const { data, error } = await supabase.from('incomes').select('*').order('received_on', { ascending: false })
       if (error) throw error
       const incomes = data || []
       listEl.innerHTML = ''

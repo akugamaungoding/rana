@@ -33,18 +33,15 @@ export function renderCalendar(container) {
   const dayContent = document.getElementById('cal-day-content')
   async function loadData(year, month) {
     showLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { showLoading(false); return }
-    const uid = session.user.id
-
+    // No auth check - show all calendar data (mode tanpa login)
     const start = new Date(year, month, 1).toISOString().split('T')[0]
     const end = new Date(year, month + 1, 0).toISOString().split('T')[0]
 
     try {
       const [expRes, incRes, updRes] = await Promise.all([
-        supabase.from('expenses').select('*').eq('user_id', uid).gte('spent_on', start).lte('spent_on', end),
-        supabase.from('incomes').select('*').eq('user_id', uid).gte('received_on', start).lte('received_on', end),
-        supabase.from('investment_updates').select('*, investments(name)').eq('user_id', uid).gte('recorded_on', start).lte('recorded_on', end),
+        supabase.from('expenses').select('*').gte('spent_on', start).lte('spent_on', end),
+        supabase.from('incomes').select('*').gte('received_on', start).lte('received_on', end),
+        supabase.from('investment_updates').select('*, investments(name)').gte('recorded_on', start).lte('recorded_on', end),
       ])
 
       if (expRes.error) throw expRes.error

@@ -67,13 +67,11 @@ export function renderInvestments(container) {
   const formSheet = document.getElementById('inv-form-sheet')
   async function load() {
     showLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { showLoading(false); return }
-    const uid = session.user.id
+    // No auth check - show all investments (mode tanpa login)
     try {
       const [invRes, updRes] = await Promise.all([
-        supabase.from('investments').select('*').eq('user_id', uid).order('created_at', { ascending: false }),
-        supabase.from('investment_updates').select('*').eq('user_id', uid).order('recorded_on', { ascending: true }),
+        supabase.from('investments').select('*').order('created_at', { ascending: false }),
+        supabase.from('investment_updates').select('*').order('recorded_on', { ascending: true }),
       ])
       if (invRes.error) throw invRes.error
       if (updRes.error) throw updRes.error

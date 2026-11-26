@@ -136,53 +136,14 @@ export function confirmAction(message) {
   })
 }
 
-async function checkAuth() {
-  const { data: { session } } = await supabase.auth.getSession()
-  return !!session
-}
+// All routes are publicly accessible - no auth required
+ // Initialize app directly at home
+ function init() {
+   currentCleanup = renderHome(app)
+   window.addEventListener('hashchange', () => {
+     // Allow hash navigation but always show home for simplicity
+     currentCleanup = renderHome(app)
+   })
+ }
 
-async function renderRoute() {
-  const hash = window.location.hash || '#home'
-
-  // Public routes: auth page only
-  if (hash === '#auth' || hash === '') {
-    app.innerHTML = ''
-    renderAuth(app)
-    return
-  }
-
-  // Protected routes: require auth
-  const authenticated = await checkAuth()
-  if (!authenticated) {
-    window.location.hash = '#auth'
-    renderAuth(app)
-    return
-  }
-
-  const render = routes[hash]
-  if (render) {
-    app.innerHTML = ''
-    currentCleanup = render(app)
-  } else {
-    window.location.hash = '#home'
-  }
-}
-
-function init() {
-  // Listen for auth state changes
-  supabase.auth.onAuthStateChange((event, session) => {
-    // If session is cleared (logout), go to auth page
-    if (event === 'SIGNED_OUT') {
-      window.location.hash = '#auth'
-    }
-    renderRoute()
-  })
-
-  // Listen for hash changes
-  window.addEventListener('hashchange', renderRoute)
-
-  // Initial render
-  renderRoute()
-}
-
-init()
+ init()

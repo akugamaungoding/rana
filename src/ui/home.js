@@ -46,16 +46,16 @@ export function renderHome(container) {
 
   async function load() {
     showLoading(true)
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { showLoading(false); return }
-    const uid = session.user.id
-    const today = todayISO()
-    const mk = monthKey()
+    // No auth check - show all data (mode tanpa login)
+    // Use current date from system
+    const today = new Date()
+    const todayISO = today.toISOString().split('T')[0]
+    const mk = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0')
 
     try {
       const [expRes, incRes] = await Promise.all([
-        supabase.from('expenses').select('*').eq('user_id', uid).order('spent_on', { ascending: false }),
-        supabase.from('incomes').select('*').eq('user_id', uid).order('received_on', { ascending: false }),
+        supabase.from('expenses').select('*').order('spent_on', { ascending: false }),
+        supabase.from('incomes').select('*').order('received_on', { ascending: false }),
       ])
 
       if (expRes.error) throw expRes.error

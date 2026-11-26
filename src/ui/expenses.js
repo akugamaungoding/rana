@@ -70,14 +70,9 @@ export function renderExpenses(container) {
 
   async function load() {
     showLoading(true)
-    populateMonths()
-    monthFilter.value = currentMonth
-    categoryFilter.value = ''
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) { showLoading(false); return }
-    const uid = session.user.id
+    // No auth check - show all expenses (mode tanpa login)
     try {
-      const { data, error } = await supabase.from('expenses').select('*').eq('user_id', uid).order('spent_on', { ascending: false })
+      const { data, error } = await supabase.from('expenses').select('*').order('spent_on', { ascending: false })
       if (error) throw error
       const expenses = data || []
       let filtered = expenses
@@ -166,8 +161,8 @@ export function renderExpenses(container) {
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault()
-    const { data: { session } } = await supabase.auth.getSession()
-    const uid = session.user.id
+    // No auth check - use fixed user ID for mode tanpa login
+    const uid = '00000000-0000-0000-0000-000000000000'
     const amount = document.getElementById('exp-amount').value
     const category = document.getElementById('exp-category').value
     const date = document.getElementById('exp-date').value
