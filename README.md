@@ -4,19 +4,20 @@ A simple, mobile-first personal finance app built with Vite, vanilla JavaScript,
 
 ## Features
 
-- **Authentication** – Email/password sign up, log in, log out (Supabase Auth)
 - **Expenses** – Track spending by category, date, and note with filters and totals
 - **Income** – Record income sources with optional recurring monthly entries
 - **Dashboard** – Income vs expenses vs balance with a progress bar
 - **Calendar** – Monthly view with expense/income/investment markers and day detail sheet
 - **Investments** – Track investment capital, value updates, return %, annualized return, and portfolio summary
 
+> No authentication required. The app uses Supabase as a database only via the `anon` key.
+
 ## Tech Stack
 
-- Frontend: Vite + vanilla JavaScript (no framework)
-- Backend: Supabase (PostgreSQL + Auth)
-- Styling: Custom CSS (mobile-first, responsive)
-- Deploy: Vercel (static build, `dist` output)
+- **Frontend:** Vite + vanilla JavaScript (no framework)
+- **Backend:** Supabase (PostgreSQL, no auth)
+- **Styling:** Custom CSS (mobile-first, responsive)
+- **Deploy:** Vercel (static build, `dist` output)
 
 ## Project Structure
 
@@ -29,28 +30,32 @@ vite.config.js
 README.md
 SUPABASE_SETUP.md
 supabase/schema.sql
-src/main.js
-src/supabase.js
-src/styles.css
-src/ui/auth.js
-src/ui/components.js
-src/ui/home.js
-src/ui/expenses.js
-src/ui/income.js
-src/ui/calendar.js
-src/ui/investments.js
+src/
+  main.js
+  supabase.js
+  styles.css
+  lib/calc.js
+  ui/
+    components.js
+    home.js
+    expenses.js
+    income.js
+    calendar.js
+    investments.js
+scripts/
+  smoke-test.js
 ```
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js installed
+- Node.js 18+ installed
 - A Supabase account (free tier)
 
 ### 1. Set up Supabase
 
-See `SUPABASE_SETUP.md` for a step-by-step guide to creating your Supabase project, running the schema, and configuring auth.
+See [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) for a step-by-step guide.
 
 ### 2. Install dependencies
 
@@ -60,13 +65,11 @@ npm install
 
 ### 3. Configure environment variables
 
-Copy `.env.example` to `.env` and fill in your Supabase credentials:
-
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and paste your Project URL and anon public key from Supabase Project Settings → API.
+Edit `.env` and paste your Supabase Project URL and anon public key.
 
 ### 4. Run locally
 
@@ -86,11 +89,10 @@ Output goes to `dist/`.
 
 ### 6. Deploy to Vercel
 
-1. Push your code to GitHub
-2. Import the repo in Vercel
-3. Add environment variables: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
+1. Push to GitHub
+2. Import in Vercel
+3. Add env vars: `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
 4. Deploy
-5. In Supabase, go to Authentication → URL Configuration and add your Vercel URL as the Site URL
 
 ## License
 

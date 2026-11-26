@@ -1,5 +1,5 @@
+import './styles.css'
 import { supabase } from './supabase.js'
-import { renderAuth } from './ui/auth.js'
 import { renderHome } from './ui/home.js'
 import { renderExpenses } from './ui/expenses.js'
 import { renderIncome } from './ui/income.js'
@@ -8,142 +8,99 @@ import { renderInvestments } from './ui/investments.js'
 
 const app = document.getElementById('app')
 
-// Route map: hash -> render function
-const routes = {
-  '#home': renderHome,
-  '#expenses': renderExpenses,
-  '#income': renderIncome,
-  '#calendar': renderCalendar,
-  '#invest': renderInvestments,
+// Tab config
+const TABS = [
+  { hash: '#home',     icon: 'ti-home',        label: 'Home',     render: renderHome },
+  { hash: '#expenses', icon: 'ti-credit-card',  label: 'Expenses', render: renderExpenses },
+  { hash: '#income',   icon: 'ti-coins',        label: 'Income',   render: renderIncome },
+  { hash: '#calendar', icon: 'ti-calendar',     label: 'Calendar', render: renderCalendar },
+  { hash: '#invest',   icon: 'ti-trending-up',  label: 'Invest',   render: renderInvestments },
+]
+
+let currentTab = null
+
+function getHash() {
+  return location.hash || '#home'
 }
 
-let currentCleanup = null
+function buildShell() {
+  // Top nav (desktop)
+  const topNav = document.createElement('nav')
+  topNav.className = 'top-nav'
+  topNav.innerHTML = `<div class="pill-menu">${
+    TABS.map(t => `<button class="pill-item" data-hash="${t.hash}"><i class="ti ${t.icon}"></i>${t.label}</button>`).join('')
+  }</div>`
 
-// Show a message banner (temporary)
-export function showMessage(text, type = 'info') {
-  // Remove existing banner
-  const existing = document.getElementById('message-banner')
-  if (existing) existing.remove()
+  // Page container
+  const pageContainer = document.createElement('main')
+  pageContainer.id = 'page-container'
 
-  const banner = document.createElement('div')
-  banner.id = 'message-banner'
-  banner.style.cssText = `
-    position: fixed;
-    top: 80px;
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 10px 16px;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 500;
-    font-family: Inter, sans-serif;
-    z-index: 1000;
-    box-sizing: border-box;
-    max-width: 90%;
-    text-align: center;
-    opacity: 0;
-    transition: opacity 150ms ease;
-  `
-  if (type === 'error') {
-    banner.style.background = '#7F3DD0'
-    banner.style.color = '#ffffff'
-  } else if (type === 'success') {
-    banner.style.background = '#7F3DD0'
-    banner.style.color = '#ffffff'
-  } else {
-    banner.style.background = '#7F3DD0'
-    banner.style.color = '#ffffff'
-  }
-  banner.textContent = text
-  document.body.appendChild(banner)
+  // Bottom nav (mobile)
+  const bottomNav = document.createElement('nav')
+  bottomNav.className = 'bottom-nav'
+  bottomNav.innerHTML = TABS.map(t =>
+    `<button class="nav-item" data-hash="${t.hash}" aria-label="${t.label}">
+      <i class="ti ${t.icon}"></i><span>${t.label}</span>
+    </button>`
+  ).join('')
 
-  // Trigger reflow
-  banner.offsetHeight
-  banner.style.opacity = '1'
+  app.innerHTML = ''
+  app.appendChild(topNav)
+  app.appendChild(pageContainer)
+  app.appendChild(bottomNav)
 
-  setTimeout(() => {
-    banner.style.opacity = '0'
-    setTimeout(() => banner.remove(), 150)
-  }, 3000)
-}
-
-// Show a loading overlay
-export function showLoading(show) {
-  let overlay = document.getElementById('loading-overlay')
-  if (show) {
-    if (overlay) return
-    overlay = document.createElement('div')
-    overlay.id = 'loading-overlay'
-    overlay.style.cssText = `
-      position: fixed;
-      inset: 0;
-      background: rgba(255,255,255,0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 9999;
-      font-family: Inter, sans-serif;
-      font-size: 16px;
-      font-weight: 500;
-      color: #7F3DD0;
-    `
-    overlay.textContent = 'Loading...'
-    document.body.appendChild(overlay)
-  } else {
-    if (overlay) overlay.remove()
-  }
-}
-
-// Confirm dialog
-export function confirmAction(message) {
-  return new Promise((resolve) => {
-    const dlg = document.createElement('div')
-    dlg.style.cssText = `
-      position: fixed;
-      inset: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      z-index: 10000;
-    `
-    const card = document.createElement('div')
-    card.style.cssText = `
-      background: #ffffff;
-      border: 1px solid #E4D6F5;
-      border-radius: 16px;
-      padding: 24px;
-      max-width: 300px;
-      width: 88%;
-      font-family: Inter, sans-serif;
-      box-sizing: border-box;
-    `
-    card.innerHTML = `
-      <p style="margin:0 0 16px; font-size:15px; color:#1a1a1a;">${message}</p>
-      <div style="display:flex; gap:8px; justify-content:flex-end;">
-        <button id="cancel-btn" style="background:#ffffff;border:1px solid #E4D6F5;border-radius:8px;padding:10px 16px;font:500 14px Inter;cursor:pointer;color:#1a1a1a;">Cancel</button>
-        <button id="confirm-btn" style="background:#7F3DD0;border:none;border-radius:8px;padding:10px 16px;font:500 14px Inter;cursor:pointer;color:#ffffff;">Delete</button>
-      </div>
-    `
-    dlg.appendChild(card)
-    document.body.appendChild(dlg)
-
-    const resolveResult = (val) => {
-      dlg.remove()
-      resolve(val)
+  // Event delegation for nav clicks
+  const handleNav = (e) => {
+    const btn = e.target.closest('[data-hash]')
+    if (btn) {
+      location.hash = btn.dataset.hash
     }
-    card.querySelector('#cancel-btn').onclick = () => resolveResult(false)
-    card.querySelector('#confirm-btn').onclick = () => resolveResult(true)
+  }
+  topNav.addEventListener('click', handleNav)
+  bottomNav.addEventListener('click', handleNav)
+}
+
+function updateActiveNav(hash) {
+  // Update bottom nav
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.hash === hash)
+  })
+  // Update top nav
+  document.querySelectorAll('.pill-item').forEach(el => {
+    el.classList.toggle('active', el.dataset.hash === hash)
   })
 }
 
-// All routes are publicly accessible - no auth required
- // Initialize app directly at home
- function init() {
-   currentCleanup = renderHome(app)
-   window.addEventListener('hashchange', () => {
-     // Allow hash navigation but always show home for simplicity
-     currentCleanup = renderHome(app)
-   })
- }
+function navigate() {
+  const hash = getHash()
+  const tab = TABS.find(t => t.hash === hash) || TABS[0]
 
- init()
+  // Don't re-render same tab
+  if (currentTab === tab.hash) return
+  currentTab = tab.hash
+
+  updateActiveNav(tab.hash)
+
+  const container = document.getElementById('page-container')
+  // Create page div
+  container.innerHTML = ''
+  const page = document.createElement('div')
+  page.className = 'page'
+  container.appendChild(page)
+
+  // Render the tab content
+  tab.render(page)
+
+  // Animate in
+  requestAnimationFrame(() => {
+    page.classList.add('active')
+  })
+}
+
+// Init
+buildShell()
+navigate()
+window.addEventListener('hashchange', () => {
+  currentTab = null // force re-render on hash change
+  navigate()
+})

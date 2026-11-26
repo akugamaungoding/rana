@@ -1,310 +1,468 @@
 import { supabase } from '../supabase.js'
-import { formatCurrency, formatDate, formatDateInput, todayISO, emptyState, listItem, showMessage, showLoading, confirmAction } from './components.js'
-
-function returnPercent(value, capital) {
-  // Return % = (value - capital) / capital * 100
-  if (!capital || capital <= 0) return 0
-  return ((value - capital) / capital) * 100
-}
-
-function profitLoss(value, capital) {
-  return value - capital
-}
-
-function daysSinceStart(recordedOn, startDate) {
-  const start = new Date(startDate + 'T00:00:00')
-  const recorded = new Date(recordedOn + 'T00:00:00')
-  return Math.ceil((recorded - start) / (1000 * 60 * 60 * 24))
-}
-
-function annualizedReturn(value, capital, days) {
-  // ((value / capital) ^ (365 / days) - 1) * 100
-  if (!days || days <= 0) return null
-  if (!capital || capital <= 0) return null
-  try {
-    return ((Math.pow(value / capital, 365 / days) - 1) * 100)
-  } catch (e) {
-    return null
-  }
-}
+import { todayLocal, formatCurrency, formatDate, daysBetween, returnPercent, profitLoss, annualizedReturn } from '../lib/calc.js'
+import { showToast, confirmAction, emptyState, listItem, skeletonList, openSheet, closeSheet } from './components.js'
 
 export function renderInvestments(container) {
+  let editingInvId = null
+  let editingUpdateId = null
+  let editingUpdateInvId = null
+
   container.innerHTML = `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
-      <h2>Investments</h2>
-      <button class="btn-primary" id="inv-add-btn">Add Investment</button>
-    </div>
-    <div class="summary-card">
-      <h2>Portfolio Summary</h2>
-      <div class="summary-grid">
-        <div class="summary-item"><div class="value" id="port-total-capital">Rp 0</div><div class="label">Total Capital</div></div>
-        <div class="summary-item"><div class="value" id="port-total-value">Rp 0</div><div class="label">Total Latest Value</div></div>
-        <div class="summary-item positive" id="port-total-pl"><div class="value" id="port-total-pl-value">Rp 0</div><div class="label">Total Profit/Loss</div></div>
-        <div class="summary-item"><div class="value" id="port-return-pct">0%</div><div class="label">Overall Return %</div></div>
-      </div>
-    </div>
-    <div id="inv-list"></div>
-    <div id="inv-form-sheet" class="hidden">
-      <div class="card">
-        <h3 id="inv-form-title">Add Investment</h3>
-        <form id="inv-form" class="form-grid">
-          <input type="hidden" id="inv-id" />
-          <div class="form-group"><label>Name</label><input type="text" id="inv-name" required placeholder="e.g. Tech Stocks" /></div>
-          <div class="form-group"><label>Initial Capital</label><input type="number" id="inv-capital" step="0.01" min="0" required placeholder="0" /></div>
-          <div class="form-group"><label>Start Date</label><input type="date" id="inv-start-date" required /></div>
-          <div class="form-group"><label>End Date</label><input type="date" id="inv-end-date" required /></div>
-          <div class="form-actions">
-            <button type="button" class="btn-secondary" id="inv-form-cancel">Cancel</button>
-            <button type="submit" class="btn-primary" id="inv-form-save">Save</button>
+    <h2 class="section-title">Investments</h2>
+
+    <div id="inv-port" class="port-grid"></div>
+    <div id="inv-list">${skeletonList(2)}</div>
+
+    <button class="fab" id="inv-fab" aria-label="Add Investment"><i class="ti ti-plus"></i></button>
+    <div class="sheet-backdrop" id="inv-backdrop"></div>
+    <div class="bottom-sheet" id="inv-sheet">
+      <div class="sheet-handle"></div>
+      <h3 id="inv-form-title" style="font-size:16px;margin-bottom:12px;">Add Investment</h3>
+      <form id="inv-form" class="form-grid">
+        <div class="form-group">
+          <label>Name</label>
+          <input type="text" id="inv-name" required placeholder="e.g. Tech Stocks" />
+        </div>
+        <div class="form-group">
+          <label>Initial Capital (Rp)</label>
+          <input type="text" id="inv-capital" inputmode="numeric" required placeholder="0" autocomplete="off" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Start Date</label>
+            <input type="date" id="inv-start" required />
           </div>
-        </form>
-      </div>
+          <div class="form-group">
+            <label>End Date</label>
+            <input type="date" id="inv-end" required />
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn-secondary" id="inv-cancel">Cancel</button>
+          <button type="submit" class="btn-primary" id="inv-save">Save</button>
+        </div>
+      </form>
     </div>
   `
 
-  let editingId = null
-  const listEl = container.querySelector('#inv-list')
-  const formSheet = document.getElementById('inv-form-sheet')
+  const listEl = document.getElementById('inv-list')
+  const portEl = document.getElementById('inv-port')
+  const sheet = document.getElementById('inv-sheet')
+  const backdrop = document.getElementById('inv-backdrop')
+  const form = document.getElementById('inv-form')
+  const formTitle = document.getElementById('inv-form-title')
+  const saveBtn = document.getElementById('inv-save')
+  const capitalInput = document.getElementById('inv-capital')
+
+  // Format capital input
+  capitalInput.addEventListener('input', () => {
+    let raw = capitalInput.value.replace(/[^\d]/g, '')
+    if (raw) capitalInput.value = Number(raw).toLocaleString('id-ID')
+  })
+
+  document.getElementById('inv-fab').addEventListener('click', () => openForm())
+  document.getElementById('inv-cancel').addEventListener('click', () => closeForm())
+  backdrop.addEventListener('click', () => closeForm())
+
+  function openForm(inv) {
+    editingInvId = inv ? inv.id : null
+    formTitle.textContent = inv ? 'Edit Investment' : 'Add Investment'
+    form.reset()
+    if (inv) {
+      document.getElementById('inv-name').value = inv.name
+      capitalInput.value = Number(inv.capital).toLocaleString('id-ID')
+      document.getElementById('inv-start').value = inv.start_date
+      document.getElementById('inv-end').value = inv.end_date
+    } else {
+      document.getElementById('inv-start').value = todayLocal()
+      document.getElementById('inv-end').value = todayLocal()
+    }
+    openSheet(sheet, backdrop)
+  }
+
+  function closeForm() {
+    closeSheet(sheet, backdrop)
+    editingInvId = null
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault()
+    const name = document.getElementById('inv-name').value.trim()
+    if (!name) { showToast('Please enter a name', 'error'); return }
+
+    const rawCap = capitalInput.value.replace(/\./g, '').replace(/,/g, '')
+    const capital = Number(rawCap)
+    if (isNaN(capital) || capital <= 0) { showToast('Capital must be greater than 0', 'error'); return }
+
+    const startDate = document.getElementById('inv-start').value
+    const endDate = document.getElementById('inv-end').value
+    if (!startDate || !endDate) { showToast('Please select both dates', 'error'); return }
+    if (endDate < startDate) { showToast('End date must be on or after start date', 'error'); return }
+
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving...'
+    try {
+      const payload = { name, capital, start_date: startDate, end_date: endDate }
+      if (editingInvId) {
+        const { error } = await supabase.from('investments').update(payload).eq('id', editingInvId)
+        if (error) { console.error('[investments.update]', error); showToast(error.message, 'error'); return }
+        showToast('Investment updated', 'success')
+      } else {
+        const { error } = await supabase.from('investments').insert(payload)
+        if (error) { console.error('[investments.insert]', error); showToast(error.message, 'error'); return }
+        showToast('Investment added', 'success')
+      }
+      closeForm()
+      load()
+    } catch (err) {
+      console.error('[investments.submit]', err)
+      showToast('Failed to save investment', 'error')
+    } finally {
+      saveBtn.disabled = false; saveBtn.textContent = 'Save'
+    }
+  })
+
   async function load() {
-    showLoading(true)
-    // No auth check - show all investments (mode tanpa login)
     try {
       const [invRes, updRes] = await Promise.all([
         supabase.from('investments').select('*').order('created_at', { ascending: false }),
         supabase.from('investment_updates').select('*').order('recorded_on', { ascending: true }),
       ])
-      if (invRes.error) throw invRes.error
-      if (updRes.error) throw updRes.error
+      if (invRes.error) { console.error('[investments.select]', invRes.error); showToast(invRes.error.message, 'error'); return }
+      if (updRes.error) { console.error('[updates.select]', updRes.error); showToast(updRes.error.message, 'error'); return }
+
       const investments = invRes.data || []
       const allUpdates = updRes.data || []
+
       const updatesByInv = {}
       allUpdates.forEach(u => {
         if (!updatesByInv[u.investment_id]) updatesByInv[u.investment_id] = []
         updatesByInv[u.investment_id].push(u)
       })
-      renderPortfolioSummary(investments, updatesByInv)
-      renderInvestmentsList(investments, updatesByInv)
-    } catch (err) { showMessage(err.message || 'Failed to load investments', 'error') }
-    finally { showLoading(false) }
+
+      renderPortfolio(investments, updatesByInv)
+      renderList(investments, updatesByInv)
+    } catch (err) {
+      console.error('[investments.load]', err)
+      showToast('Failed to load investments', 'error')
+    }
   }
 
-  function renderPortfolioSummary(investments, updatesByInv) {
-    let totalCapital = 0
-    let totalLatestValue = 0
-    investments.forEach(inv => {
-      totalCapital += Number(inv.capital)
-      const updates = updatesByInv[inv.id] || []
-      if (updates.length > 0) {
-        const latest = updates[updates.length - 1]
-        totalLatestValue += Number(latest.value)
-      } else {
-        totalLatestValue += Number(inv.capital)
-      }
-    })
-    const totalPL = totalLatestValue - totalCapital
-    const overallReturn = totalCapital > 0 ? (totalPL / totalCapital) * 100 : 0
-    document.getElementById('port-total-capital').textContent = formatCurrency(totalCapital)
-    document.getElementById('port-total-value').textContent = formatCurrency(totalLatestValue)
-    const plEl = document.getElementById('port-total-pl-value')
-    const plItem = document.getElementById('port-total-pl')
-    plEl.textContent = totalPL >= 0 ? '+' + formatCurrency(totalPL) : '-' + formatCurrency(Math.abs(totalPL))
-    plItem.className = 'summary-item ' + (totalPL >= 0 ? 'positive' : 'negative')
-    document.getElementById('port-return-pct').textContent = (overallReturn >= 0 ? '+' : '') + overallReturn.toFixed(2) + '%'
-  }
-  const form = document.getElementById('inv-form')
-  const addBtn = document.getElementById('inv-add-btn')
-  const cancelBtn = document.getElementById('inv-form-cancel')
-  const saveBtn = document.getElementById('inv-form-save')
-  const formTitle = document.getElementById('inv-form-title')
-  function renderInvestmentsList(investments, updatesByInv) {
-    listEl.innerHTML = ''
+  function renderPortfolio(investments, updatesByInv) {
     if (investments.length === 0) {
-      listEl.appendChild(emptyState('ti ti-trending-up', 'No investments yet', 'Tap "Add Investment" to start tracking your portfolio.', 'Add Investment', () => openForm()))
+      portEl.innerHTML = ''
       return
     }
+    let totalCap = 0, totalVal = 0
+    investments.forEach(inv => {
+      const cap = Number(inv.capital)
+      totalCap += cap
+      const upd = updatesByInv[inv.id] || []
+      totalVal += upd.length > 0 ? Number(upd[upd.length - 1].value) : cap
+    })
+    const pl = totalVal - totalCap
+    const ret = totalCap > 0 ? (pl / totalCap * 100) : 0
+
+    portEl.innerHTML = `
+      <div class="port-item"><div class="port-val">${formatCurrency(totalCap)}</div><div class="port-label">Total Capital</div></div>
+      <div class="port-item"><div class="port-val">${formatCurrency(totalVal)}</div><div class="port-label">Total Value</div></div>
+      <div class="port-item ${pl >= 0 ? 'positive' : 'negative'}"><div class="port-val">${pl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pl))}</div><div class="port-label">Profit/Loss</div></div>
+      <div class="port-item ${ret >= 0 ? 'positive' : 'negative'}"><div class="port-val">${ret >= 0 ? '+' : ''}${ret.toFixed(2)}%</div><div class="port-label">Return %</div></div>
+    `
+  }
+
+  function renderList(investments, updatesByInv) {
+    listEl.innerHTML = ''
+    if (investments.length === 0) {
+      listEl.appendChild(emptyState('ti ti-trending-up', 'No investments yet', 'Tap + to start tracking your portfolio.'))
+      return
+    }
+
     investments.forEach(inv => {
       const updates = updatesByInv[inv.id] || []
-      const latest = updates.length > 0 ? updates[updates.length - 1] : null
       const capital = Number(inv.capital)
+      const latest = updates.length > 0 ? updates[updates.length - 1] : null
       const latestValue = latest ? Number(latest.value) : capital
       const retPct = returnPercent(latestValue, capital)
       const pl = profitLoss(latestValue, capital)
-      const daysElapsed = latest ? daysSinceStart(latest.recorded_on, inv.start_date) : 0
-      const totalDays = daysSinceStart(inv.end_date, inv.start_date)
-      const daysRemaining = totalDays - daysElapsed
-      const annualized = latest ? annualizedReturn(latestValue, capital, daysElapsed) : null
+      const totalDays = daysBetween(inv.start_date, inv.end_date)
+      const daysElapsed = latest ? daysBetween(inv.start_date, latest.recorded_on) : 0
+      const daysRemain = Math.max(totalDays - daysElapsed, 0)
+      const ann = latest ? annualizedReturn(latestValue, capital, daysElapsed) : null
+      const progressPct = totalDays > 0 ? Math.min((daysElapsed / totalDays) * 100, 100) : 0
+
       const card = document.createElement('div')
-      card.className = 'investment-card'
-      card.innerHTML = '<div class="investment-card-header">' +
-        '<h3>' + inv.name + '</h3>' +
-        '<button class="btn-icon btn-delete" title="Delete Investment" id="del-' + inv.id + '"><i class="ti ti-trash"></i></button>' +
-        '</div>' +
-        '<div class="investment-meta">' +
-        '<div class="meta-item"><span class="meta-value">' + formatDate(inv.start_date) + '</span><span>Start</span></div>' +
-        '<div class="meta-item"><span class="meta-value">' + formatDate(inv.end_date) + '</span><span>End</span></div>' +
-        '<div class="meta-item"><span class="meta-value">' + totalDays + ' days</span><span>Duration</span></div>' +
-        '<div class="meta-item"><span class="meta-value">' + daysElapsed + ' days</span><span>Elapsed</span></div>' +
-        '</div>' +
-        '<div class="investment-returns">' +
-        '<h4>Current Position</h4>' +
-        '<div class="return-row"><span>Latest Value</span><span class="return-value">' + formatCurrency(latestValue) + '</span></div>' +
-        '<div class="return-row"><span>Return %</span><span class="return-value ' + (retPct >= 0 ? 'positive' : 'negative') + '">' + (retPct >= 0 ? '+' : '') + retPct.toFixed(2) + '%</span></div>' +
-        '<div class="return-row"><span>Profit/Loss</span><span class="return-value ' + (pl >= 0 ? 'positive' : 'negative') + '">' + (pl >= 0 ? '+' : '') + formatCurrency(pl) + '</span></div>' +
-        '<div class="return-row"><span>Days Remaining</span><span class="return-value">' + Math.max(daysRemaining, 0) + '</span></div>' +
-        (annualized !== null ? '<div class="return-row"><span>Annualized Return</span><span class="return-value ' + (annualized >= 0 ? 'positive' : 'negative') + '">' + (annualized >= 0 ? '+' : '') + annualized.toFixed(2) + '%</span></div>' : '<div class="return-row"><span>Annualized Return</span><span class="return-value">n/a</span></div>') +
-        '</div>' +
-        '<div class="chart-container"><svg id="chart-' + inv.id + '"></svg></div>' +
-        '<div style="margin-top:16px;">' +
-        '<h4 style="font-size:14px; color:var(--text-muted); margin-bottom:8px;">Add Value Update</h4>' +
-        '<form class="inv-update-form" data-inv-id="' + inv.id + '">' +
-        '<div class="form-row">' +
-        '<input type="date" class="inv-update-date" required />' +
-        '<input type="number" step="0.01" min="0" class="inv-update-value" required placeholder="Value" />' +
-        '<button type="submit" class="btn-primary" style="padding:0 16px;">Add</button>' +
-        '</div>' +
-        '</form>' +
-        '</div>' +
-        '<div class="investment-history">' +
-        '<h4>History</h4>' +
-        '<div id="hist-' + inv.id + '" class="history-list"></div>' +
-        '</div>'
-      card.querySelector('#del-' + inv.id).addEventListener('click', async () => {
+      card.className = 'inv-card'
+      card.innerHTML = `
+        <div class="inv-card-header">
+          <div>
+            <h3>${inv.name}</h3>
+            <div style="font-size:12px;color:var(--text-muted);">${formatDate(inv.start_date)} – ${formatDate(inv.end_date)} · ${totalDays} days</div>
+          </div>
+          <div style="display:flex;gap:4px;">
+            <button class="btn-icon" data-action="edit-inv" aria-label="Edit Investment"><i class="ti ti-pencil"></i></button>
+            <button class="btn-icon btn-delete" data-action="delete-inv" aria-label="Delete Investment"><i class="ti ti-trash"></i></button>
+          </div>
+        </div>
+
+        <div class="inv-progress"><div class="inv-progress-fill" style="width:${progressPct}%"></div></div>
+
+        <div class="inv-meta">
+          <div class="meta-item"><span class="meta-val">${formatCurrency(capital)}</span>Capital</div>
+          <div class="meta-item"><span class="meta-val">${formatCurrency(latestValue)}</span>Latest Value</div>
+          <div class="meta-item"><span class="meta-val">${daysElapsed} of ${totalDays}</span>Days Elapsed</div>
+          <div class="meta-item"><span class="meta-val">${daysRemain}</span>Days Left</div>
+        </div>
+
+        <div class="inv-returns">
+          <div class="inv-big-return ${retPct >= 0 ? 'positive' : 'negative'}">
+            <i class="ti ${retPct >= 0 ? 'ti-arrow-up-right' : 'ti-arrow-down-right'}"></i>
+            ${retPct >= 0 ? '+' : ''}${retPct.toFixed(2)}%
+          </div>
+          <div class="inv-return-row"><span>Profit/Loss</span><span class="inv-return-val ${pl >= 0 ? 'positive' : 'negative'}">${pl >= 0 ? '+' : '-'}${formatCurrency(Math.abs(pl))}</span></div>
+          <div class="inv-return-row"><span>Annualized Return</span><span class="inv-return-val ${ann !== null && ann >= 0 ? 'positive' : ann !== null ? 'negative' : ''}">${ann !== null ? (ann >= 0 ? '+' : '') + ann.toFixed(2) + '%' : 'n/a'}</span></div>
+        </div>
+
+        <div class="chart-wrap"><svg id="chart-${inv.id}"></svg></div>
+
+        <details style="margin-top:12px;">
+          <summary style="cursor:pointer;font-size:14px;font-weight:500;color:var(--purple);padding:8px 0;">Add Value Update</summary>
+          <form class="update-form form-grid" style="margin-top:8px;" data-inv-id="${inv.id}">
+            <div class="form-row">
+              <div class="form-group"><label>Date</label><input type="date" class="upd-date" required min="${inv.start_date}" max="${inv.end_date}" /></div>
+              <div class="form-group"><label>Value (Rp)</label><input type="text" class="upd-value" inputmode="numeric" required placeholder="0" autocomplete="off" /></div>
+            </div>
+            <button type="submit" class="btn-primary upd-save">Add Update</button>
+          </form>
+        </details>
+
+        <div style="margin-top:16px;">
+          <h4 style="font-size:14px;color:var(--text-muted);margin-bottom:8px;">History</h4>
+          <div class="history-list"></div>
+        </div>
+      `
+
+      // Event: delete investment
+      card.querySelector('[data-action="delete-inv"]').addEventListener('click', async () => {
         if (!(await confirmAction('Delete this investment and all its updates?'))) return
-        showLoading(true)
         try {
           const { error } = await supabase.from('investments').delete().eq('id', inv.id)
-          if (error) throw error
-          showMessage('Investment deleted')
+          if (error) { console.error('[investments.delete]', error); showToast(error.message, 'error'); return }
+          showToast('Investment deleted', 'success')
           load()
-        } catch (err) { showMessage(err.message || 'Failed to delete', 'error') }
-        finally { showLoading(false) }
+        } catch (err) { showToast('Failed to delete investment', 'error') }
       })
 
-      const updateForm = card.querySelector('.inv-update-form')
+      // Event: edit investment
+      card.querySelector('[data-action="edit-inv"]').addEventListener('click', () => openForm(inv))
+
+      // Event: update form
+      const updateForm = card.querySelector('.update-form')
+      const updValueInput = updateForm.querySelector('.upd-value')
+      updValueInput.addEventListener('input', () => {
+        let raw = updValueInput.value.replace(/[^\d]/g, '')
+        if (raw) updValueInput.value = Number(raw).toLocaleString('id-ID')
+      })
+
       updateForm.addEventListener('submit', async (e) => {
         e.preventDefault()
-        const { data: { session } } = await supabase.auth.getSession()
-        const uid = session.user.id
-        const date = updateForm.querySelector('.inv-update-date').value
-        const value = updateForm.querySelector('.inv-update-value').value
-        if (!date) { showMessage('Please select a date', 'error'); return }
-        if (!value || parseFloat(value) < 0) { showMessage('Please enter a valid value', 'error'); return }
-        const selDate = new Date(date + 'T00:00:00')
-        const startDate = new Date(inv.start_date + 'T00:00:00')
-        const endDate = new Date(inv.end_date + 'T00:00:00')
-        if (selDate < startDate || selDate > endDate) { showMessage('Update date must be within the investment period', 'error'); return }
-        const btn = updateForm.querySelector('button[type="submit"]')
+        const date = updateForm.querySelector('.upd-date').value
+        if (!date) { showToast('Please select a date', 'error'); return }
+        if (date < inv.start_date || date > inv.end_date) { showToast('Date must be within investment period', 'error'); return }
+
+        const rawVal = updValueInput.value.replace(/\./g, '').replace(/,/g, '')
+        const value = Number(rawVal)
+        if (isNaN(value) || value < 0) { showToast('Please enter a valid value', 'error'); return }
+
+        const btn = updateForm.querySelector('.upd-save')
         btn.disabled = true; btn.textContent = 'Saving...'
         try {
           const { error } = await supabase.from('investment_updates').insert({
-            user_id: uid, investment_id: inv.id, recorded_on: date, value: parseFloat(value), note: null,
+            investment_id: inv.id, recorded_on: date, value, note: null
           })
-          if (error) throw error
+          if (error) {
+            if (error.message && error.message.includes('unique') || error.message.includes('duplicate')) {
+              showToast('You already have an update for this date', 'error')
+            } else {
+              console.error('[updates.insert]', error)
+              showToast(error.message, 'error')
+            }
+            return
+          }
+          showToast('Update added', 'success')
           updateForm.reset()
           load()
-        } catch (err) { showMessage(err.message || 'Failed to add update', 'error') }
-        finally { btn.disabled = false; btn.textContent = 'Add' }
+        } catch (err) {
+          console.error('[updates.insert]', err)
+          showToast('Failed to add update', 'error')
+        } finally {
+          btn.disabled = false; btn.textContent = 'Add Update'
+        }
       })
 
-      const histEl = card.querySelector('#hist-' + inv.id)
+      // History list
+      const histEl = card.querySelector('.history-list')
       if (updates.length === 0) {
-        histEl.innerHTML = '<div class="history-empty">No updates yet. Add a value update above to start tracking returns.</div>'
+        histEl.innerHTML = `<div style="text-align:center;padding:24px;color:var(--text-muted);font-size:13px;">No updates yet. Add a value update above to start tracking returns.</div>`
       } else {
-        histEl.innerHTML = ''
-        updates.slice().sort((a, b) => new Date(a.recorded_on) - new Date(b.recorded_on)).forEach(u => {
-          const uRetPct = returnPercent(Number(u.value), capital)
+        updates.forEach(u => {
+          const uRet = returnPercent(Number(u.value), capital)
+          const uPl = profitLoss(Number(u.value), capital)
+          const uDays = daysBetween(inv.start_date, u.recorded_on)
+
           histEl.appendChild(listItem({
             main: formatDate(u.recorded_on),
-            sub: formatCurrency(Number(u.value)) + (u.note ? ' · ' + u.note : ''),
-            amount: (uRetPct >= 0 ? '+' : '') + uRetPct.toFixed(2) + '%',
-            amountColor: uRetPct >= 0 ? '#16a34a' : 'var(--danger)',
-            onEdit: () => openUpdateForm(u),
+            sub: `${formatCurrency(Number(u.value))} · Day ${uDays}`,
+            amount: `${uRet >= 0 ? '+' : ''}${uRet.toFixed(2)}%`,
+            amountColor: uRet >= 0 ? 'var(--success)' : 'var(--danger)',
+            onEdit: () => editUpdate(inv, u),
             onDelete: async () => {
               if (!(await confirmAction('Delete this update?'))) return
-              showLoading(true)
               try {
                 const { error } = await supabase.from('investment_updates').delete().eq('id', u.id)
-                if (error) throw error
-                showMessage('Update deleted')
+                if (error) { console.error('[updates.delete]', error); showToast(error.message, 'error'); return }
+                showToast('Update deleted', 'success')
                 load()
-              } catch (err) { showMessage(err.message || 'Failed to delete', 'error') }
-              finally { showLoading(false) }
+              } catch (err) { showToast('Failed to delete', 'error') }
             },
           }))
         })
-        drawChart('chart-' + inv.id, updates, capital)
       }
 
       listEl.appendChild(card)
+
+      // Draw chart after element is in DOM
+      requestAnimationFrame(() => drawChart(`chart-${inv.id}`, updates, capital))
     })
   }
+
+  function editUpdate(inv, u) {
+    // Find the update form in the card and pre-fill it
+    const form = document.querySelector(`[data-inv-id="${inv.id}"]`)
+    if (!form) return
+    form.closest('details').open = true
+    form.querySelector('.upd-date').value = u.recorded_on
+    const valInput = form.querySelector('.upd-value')
+    valInput.value = Number(u.value).toLocaleString('id-ID')
+    const btn = form.querySelector('.upd-save')
+    btn.textContent = 'Save Update'
+
+    // Replace submit handler temporarily
+    const newHandler = async (e) => {
+      e.preventDefault()
+      const date = form.querySelector('.upd-date').value
+      if (!date) { showToast('Please select a date', 'error'); return }
+      const rawVal = valInput.value.replace(/\./g, '').replace(/,/g, '')
+      const value = Number(rawVal)
+      if (isNaN(value) || value < 0) { showToast('Please enter a valid value', 'error'); return }
+
+      btn.disabled = true; btn.textContent = 'Saving...'
+      try {
+        const { error } = await supabase.from('investment_updates').update({
+          recorded_on: date, value, note: null
+        }).eq('id', u.id)
+        if (error) { console.error('[updates.update]', error); showToast(error.message, 'error'); return }
+        showToast('Update saved', 'success')
+        form.reset()
+        load()
+      } catch (err) {
+        showToast('Failed to save update', 'error')
+      } finally {
+        btn.disabled = false; btn.textContent = 'Add Update'
+        form.removeEventListener('submit', newHandler)
+      }
+    }
+    // Remove old submit listener by cloning
+    const newForm = form.cloneNode(true)
+    form.parentNode.replaceChild(newForm, form)
+    // Re-attach format handler
+    const newValInput = newForm.querySelector('.upd-value')
+    newValInput.value = Number(u.value).toLocaleString('id-ID')
+    newForm.querySelector('.upd-date').value = u.recorded_on
+    newValInput.addEventListener('input', () => {
+      let raw = newValInput.value.replace(/[^\d]/g, '')
+      if (raw) newValInput.value = Number(raw).toLocaleString('id-ID')
+    })
+    newForm.querySelector('.upd-save').textContent = 'Save Update'
+    newForm.addEventListener('submit', newHandler)
+  }
+
+  /**
+   * Draw an SVG line chart of Return % over time.
+   * Handles 0, 1, and many data points.
+   */
   function drawChart(elementId, updates, capital) {
     const svg = document.getElementById(elementId)
-    if (!svg || updates.length === 0) return
-    const width = svg.clientWidth || 300
-    const height = 140
-    const padding = 20
+    if (!svg || updates.length === 0) {
+      if (svg) svg.parentElement.style.display = 'none'
+      return
+    }
+
+    const width = svg.parentElement.clientWidth || 300
+    const height = 160
+    const pad = { top: 20, right: 16, bottom: 24, left: 40 }
+    const chartW = width - pad.left - pad.right
+    const chartH = height - pad.top - pad.bottom
+
     const values = updates.map(u => returnPercent(Number(u.value), capital))
-    const minVal = Math.min(...values)
-    const maxVal = Math.max(...values)
-    const range = maxVal - minVal || 1
-    const xStep = (width - 2 * padding) / Math.max(updates.length - 1, 1)
-    let path = ''
-    updates.forEach((_, i) => {
-      const x = padding + i * xStep
-      const y = height - padding - ((values[i] - minVal) / range) * (height - 2 * padding)
-      path += (i === 0 ? 'M ' + x + ' ' + y : ' L ' + x + ' ' + y)
+    const labels = updates.map(u => {
+      const parts = u.recorded_on.split('-')
+      return `${parseInt(parts[2])}/${parseInt(parts[1])}`
     })
+
+    const minVal = Math.min(0, ...values)
+    const maxVal = Math.max(0, ...values)
+    const range = maxVal - minVal || 1
+
     svg.setAttribute('width', width)
     svg.setAttribute('height', height)
-    svg.innerHTML = '<polyline points="' + path + '" fill="none" stroke="var(--primary)" stroke-width="2" />' +
-      updates.map((_, i) => {
-        const x = padding + i * xStep
-        const y = height - padding - ((values[i] - minVal) / range) * (height - 2 * padding)
-        return '<circle cx="' + x + '" cy="' + y + '" r="3" fill="var(--primary)" />'
-      }).join('')
+    svg.setAttribute('viewBox', `0 0 ${width} ${height}`)
+
+    if (updates.length === 1) {
+      // Single point
+      const x = pad.left + chartW / 2
+      const y = pad.top + chartH / 2
+      svg.innerHTML = `
+        <circle cx="${x}" cy="${y}" r="4" fill="var(--purple)" />
+        <text x="${x}" y="${y - 10}" text-anchor="middle" font-size="12" fill="var(--text-muted)">${values[0].toFixed(1)}%</text>
+      `
+      return
+    }
+
+    const xStep = chartW / (updates.length - 1)
+    const points = values.map((v, i) => {
+      const x = pad.left + i * xStep
+      const y = pad.top + chartH - ((v - minVal) / range) * chartH
+      return { x, y }
+    })
+
+    // Area fill path
+    const areaPath = `M ${points[0].x} ${pad.top + chartH} ` +
+      points.map(p => `L ${p.x} ${p.y}`).join(' ') +
+      ` L ${points[points.length - 1].x} ${pad.top + chartH} Z`
+
+    // Line path
+    const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ')
+
+    // Zero line
+    const zeroY = pad.top + chartH - ((0 - minVal) / range) * chartH
+
+    // Axis labels (first and last date, and 0% line)
+    svg.innerHTML = `
+      <defs>
+        <linearGradient id="area-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="var(--purple)" stop-opacity="0.15" />
+          <stop offset="100%" stop-color="var(--purple)" stop-opacity="0.02" />
+        </linearGradient>
+      </defs>
+      <line x1="${pad.left}" y1="${zeroY}" x2="${width - pad.right}" y2="${zeroY}" stroke="var(--purple-line)" stroke-width="1" stroke-dasharray="4 2" />
+      <text x="${pad.left - 4}" y="${zeroY + 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">0%</text>
+      <path d="${areaPath}" fill="var(--purple-soft)" />
+      <path d="${linePath}" fill="none" stroke="var(--purple)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      ${points.map((p, i) => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="var(--purple)" />`).join('')}
+      <text x="${points[0].x}" y="${height - 4}" text-anchor="start" font-size="11" fill="var(--text-muted)">${labels[0]}</text>
+      <text x="${points[points.length - 1].x}" y="${height - 4}" text-anchor="end" font-size="11" fill="var(--text-muted)">${labels[labels.length - 1]}</text>
+    `
   }
 
-  function openForm() {
-    editingId = null
-    formTitle.textContent = 'Add Investment'
-    form.reset()
-    document.getElementById('inv-id').value = ''
-    document.getElementById('inv-name').value = ''
-    document.getElementById('inv-capital').value = ''
-    document.getElementById('inv-start-date').value = todayISO()
-    document.getElementById('inv-end-date').value = todayISO()
-    formSheet.classList.remove('hidden')
-    document.getElementById('inv-name').focus()
-  }
-
-  function closeForm() { formSheet.classList.add('hidden'); editingId = null }
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault()
-    const { data: { session } } = await supabase.auth.getSession()
-    const uid = session.user.id
-    const name = document.getElementById('inv-name').value.trim()
-    const capital = document.getElementById('inv-capital').value
-    const startDate = document.getElementById('inv-start-date').value
-    const endDate = document.getElementById('inv-end-date').value
-    if (!name) { showMessage('Please enter a name', 'error'); return }
-    if (!capital || parseFloat(capital) <= 0) { showMessage('Capital must be greater than 0', 'error'); return }
-    if (!startDate || !endDate) { showMessage('Please select both dates', 'error'); return }
-    if (new Date(endDate) < new Date(startDate)) { showMessage('End date must be after start date', 'error'); return }
-    saveBtn.disabled = true; saveBtn.textContent = 'Saving...'
-    try {
-      const payload = { user_id: uid, name, capital: parseFloat(capital), start_date: startDate, end_date: endDate }
-      const { error } = await supabase.from('investments').insert(payload)
-      if (error) throw error
-      showMessage('Investment added')
-      closeForm(); load()
-    } catch (err) { showMessage(err.message || 'Failed to save investment', 'error') }
-    finally { saveBtn.disabled = false; saveBtn.textContent = 'Save' }
-  })
-
-  cancelBtn.addEventListener('click', closeForm)
-  addBtn.addEventListener('click', openForm)
   load()
-  return () => {}
 }

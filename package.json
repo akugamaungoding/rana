@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "devDependencies": {
+    "dotenv": "^18.0.10",
     "vite": "^5.0.0"
   },
   "dependencies": {
